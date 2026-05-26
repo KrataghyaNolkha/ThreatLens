@@ -188,10 +188,8 @@ def get_ip_geolocation(ip):
     # Cache the result
     geo_cache[ip] = (datetime.now(), geo_data)
     
-    # Rate limiting
-    time.sleep(0.5)
-    
     return geo_data
+
 
 def get_ip_reputation(ip):
     """Get IP reputation from VirusTotal"""
@@ -231,11 +229,11 @@ def get_ip_reputation(ip):
 
 def enrich_ip(ip):
     """Main function to enrich IP with geolocation and reputation"""
-    print(f"🔍 Enriching IP: {ip}")
+    print(f"Enriching IP: {ip}")
     
     # Get geolocation
     geo = get_ip_geolocation(ip)
-    print(f"📍 Geo data: {geo.get('city')}, {geo.get('country')} ({geo.get('lat')}, {geo.get('lon')})")
+    print(f"Geo data: {geo.get('city')}, {geo.get('country')} ({geo.get('lat')}, {geo.get('lon')})")
     
     # Get reputation
     reputation = get_ip_reputation(ip)
@@ -271,7 +269,7 @@ def enrich_ip(ip):
         "enriched_at": datetime.now().isoformat()
     }
     
-    print(f"✅ IP enrichment complete. Risk: {risk_level} ({risk_score})")
+    print(f"IP enrichment complete. Risk: {risk_level} ({risk_score})")
     return result
 
 # Test function

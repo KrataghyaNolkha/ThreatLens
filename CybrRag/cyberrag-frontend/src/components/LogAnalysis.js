@@ -1,942 +1,409 @@
-// src/components/LogAnalysis.js
+// src/components/LogAnalysis.js — Threat Studio (no MUI)
 import React, { useState } from 'react';
-import {
-  Grid,
-  Paper,
-  Typography,
-  TextField,
-  Button,
-  Alert,
-  Chip,
-  Box,
-  Card,
-  CardContent,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Divider,
-  LinearProgress,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableRow,
-  TableHead,
-  IconButton,
-  Tooltip,
-  Avatar,
-  Stack,
-  alpha,
-  Fade,
-  Zoom,
-  Badge,
-  Tabs,
-  Tab,
-  Rating,
-} from '@mui/material';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Security as SecurityIcon,
-  Warning as WarningIcon,
-  ContentCopy as ContentCopyIcon,
-  BugReport as BugReportIcon,
-  LocalPolice as LocalPoliceIcon,
-  Public as PublicIcon,
-  Computer as ComputerIcon,
-  Flag as FlagIcon,
-  LocationOn as LocationIcon,
-  Timeline as TimelineIcon,
-  Analytics as AnalyticsIcon,
-  Biotech as BiotechIcon,
-  Upload as UploadIcon,
-  Clear as ClearIcon,
-  PlayArrow as PlayArrowIcon,
-  Info as InfoIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Map as MapIcon,
-  Download as DownloadIcon,
-  Share as ShareIcon,
-  MoreVert as MoreVertIcon,
-  Psychology as PsychologyIcon,
-  AutoAwesome as AutoAwesomeIcon,
-} from '@mui/icons-material';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { useNavigate } from 'react-router-dom';
+import { analyzeLog, getApiErrorMessage } from '../services/api';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { analyzeLog } from '../services/api';
 
-// Fix for default markers
+import '../styles/globals.css';
+import './AppShell.css';
+import './LogAnalysis.css';
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+  iconUrl: require('leaflet/dist/images/marker-icon.png'),
+  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-const colors = {
-  primary: '#4f46e5',
-  secondary: '#7c3aed',
-  accent: '#db2777',
-  success: '#059669',
-  warning: '#d97706',
-  error: '#dc2626',
-  info: '#2563eb',
-  purple: '#7c3aed',
-  teal: '#0d9488',
-  background: '#f8fafc',
-  surface: '#ffffff',
-  elevated: '#f1f5f9',
-  text: '#0f172a',
-  textSecondary: '#64748b',
-};
+const SAMPLE_LOGS = [
+  { label: 'Windows Brute Force', value: '2024-01-15 10:23:45 FAILED_LOGIN user=admin src_ip=203.0.113.99 event_id=4625 dest_ip=192.168.1.10' },
+  { label: 'PowerShell Obfuscation', value: 'Jan 15 11:45:23 server01 PowerShell[1234]: Invoke-Expression -EncodedCommand dABlAHMAdA== user=SYSTEM event_id=4104' },
+  { label: 'Mimikatz/LSASS Dump', value: '2024-01-15 14:30:00 PROCESS_CREATE process=mimikatz.exe user=jdoe src_ip=10.0.0.5 event_id=4688' },
+  { label: 'Successful Post-Breach Login', value: '2024-01-15 15:00:00 SUCCESS_LOGIN user=admin src_ip=203.0.113.99 event_id=4624 port=22' },
+  { label: 'Data Exfiltration', value: 'Jan 15 16:22:11 firewall ALLOW src=10.0.0.25 dst=198.51.100.45 port=443 bytes=524288000 protocol=HTTPS' },
+  { label: 'Cisco ASA Deny', value: 'Jan 15 09:12:00 %ASA-2-106001: Inbound TCP connection denied from 203.0.113.50/4444 to 192.168.1.1/80 flags SYN on interface outside' },
+];
 
-const LogAnalysis = () => {
-  const [logInput, setLogInput] = useState('');
-  const [loading, setLoading] = useState(false);
+function RiskGauge({ score }) {
+  const pct = Math.min(100, Math.max(0, score || 0));
+  const color = pct >= 80 ? 'var(--danger)' : pct >= 55 ? 'var(--warning)' : pct >= 30 ? 'var(--info)' : 'var(--success)';
+  const level = pct >= 80 ? 'CRITICAL' : pct >= 55 ? 'HIGH' : pct >= 30 ? 'MEDIUM' : 'LOW';
+  return (
+    <div className="risk-gauge">
+      <div className="risk-gauge-ring" style={{ '--pct': pct, '--color': color }}>
+        <div className="risk-gauge-inner">
+          <span className="risk-gauge-score" style={{ color }}>{pct}</span>
+          <span className="risk-gauge-label">/100</span>
+        </div>
+      </div>
+      <div className="risk-gauge-level" style={{ color }}>{level}</div>
+    </div>
+  );
+}
+
+function ParsedField({ label, value, mono }) {
+  if (!value) return null;
+  return (
+    <div className="parsed-field">
+      <span className="parsed-label">{label}</span>
+      <span className={`parsed-value ${mono ? 'font-mono' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+function RiskFactors({ factors }) {
+  if (!factors?.length) return null;
+  return (
+    <div className="risk-factors">
+      {factors.map((f, i) => (
+        <div key={i} className="risk-factor-item">
+          <span className="rf-name">{f.factor || f}</span>
+          {f.score !== undefined && <span className="rf-score">+{f.score}pts</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function LogAnalysis() {
+  const [input, setInput] = useState('');
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState(0);
-  const [mapView, setMapView] = useState('standard');
+  const [activeTab, setActiveTab] = useState('overview');
+  const navigate = useNavigate();
 
-  const sampleLogs = [
-    {
-      label: 'PowerShell',
-      log: 'EventID: 4688 User: admin Process: powershell.exe CommandLine: powershell -enc aw52b2tlLw1hbG1jaW91cw== SourceIP: 203.55.77.99',
-      color: colors.purple,
-    },
-    {
-      label: 'Failed Login',
-      log: 'EventID: 4625 User: admin SourceIP: 203.55.77.99 Status: Failed Login',
-      color: colors.error,
-    },
-    {
-      label: 'Brute Force',
-      log: 'EventID: 4625 User: unknown SourceIP: 45.155.205.233 Status: Failed Login x5',
-      color: colors.warning,
-    },
-  ];
-
-  const handleAnalyze = async () => {
-    if (!logInput.trim()) return;
-
-    setLoading(true);
-    setError(null);
+  const analyze = async () => {
+    if (!input.trim()) { setError('Please enter a log to analyze.'); return; }
+    setLoading(true); setError(null); setResult(null);
     try {
-      const data = await analyzeLog(logInput);
-      setResult(data);
-    } catch (err) {
-      setError('Failed to analyze log. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+      const data = await analyzeLog(input.trim());
+      setResult({
+        parsed_log: data.parsed_log,
+        threat_type: String(data.detection_result?.threat_detected || 'Unknown Threat'),
+        risk_score: data.risk_assessment?.risk_score || 0,
+        summary: typeof data.soc_summary === 'object' ? String(data.soc_summary.executive_summary || '') : String(data.soc_summary || ''),
+        full_analysis: typeof data.soc_summary === 'object' ? data.soc_summary : null,
+        mitre_technique: String(data.detection_result?.mitre_candidate || ''),
+        campaign_id: data.detection_result?.campaign?.campaign_id,
+        is_multi_stage: !!data.detection_result?.multi_stage_correlation,
+        confidence: data.detection_result?.confidence,
+        status: data.incident_id ? 'Incident Created' : 'No Incident',
+        source_ip: String(data.parsed_log?.source_ip || ''),
+        mitre_tactic: String(data.mitre_details?.tactics?.[0] || 'Unknown'),
+        cve_id: String(data.related_cves?.[0]?.id || 'None'),
+        on_blocklist: data.blocklist_hit,
+        ioc_match: data.ioc_matches?.length > 0,
+        risk_factors: Array.isArray(data.risk_assessment?.risk_factors) ? data.risk_assessment.risk_factors.map(String) : [],
+        confidence_reasons: [],
+        soar_actions: [],
+        ip_intelligence: data.ip_intelligence,
+        raw_result: data
+      });
+      setActiveTab('overview');
+    } catch (e) {
+      setError(getApiErrorMessage(e, 'Analysis failed. Check backend connection.'));
+    } finally { setLoading(false); }
   };
 
-  const handleClear = () => {
-    setLogInput('');
-    setResult(null);
-    setError(null);
-  };
+  const loadSample = (log) => setInput(log.value);
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(JSON.stringify(text, null, 2));
-  };
 
-  const getSeverityColor = (level) => {
-    switch (level?.toUpperCase()) {
-      case 'CRITICAL': return colors.error;
-      case 'HIGH': return colors.warning;
-      case 'MEDIUM': return colors.info;
-      case 'LOW': return colors.success;
-      default: return colors.primary;
-    }
-  };
-
-  // Mock IP data for map
-  const mockIpData = {
-    '203.55.77.99': { lat: -31.9505, lng: 115.8605, city: 'Perth', country: 'Australia' },
-    '45.155.205.233': { lat: 48.8566, lng: 2.3522, city: 'Paris', country: 'France' },
-    '8.8.8.8': { lat: 37.422, lng: -122.084, city: 'Mountain View', country: 'USA' },
-  };
-
-  const getIpLocation = (ip) => {
-    return mockIpData[ip] || { lat: 0, lng: 0, city: 'Unknown', country: 'Unknown' };
-  };
 
   return (
-    <Box sx={{ bgcolor: colors.background, minHeight: '100vh' }}>
-      {/* Header */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          mb: 3,
-          background: `linear-gradient(135deg, ${alpha(colors.primary, 0.1)} 0%, ${alpha(colors.secondary, 0.05)} 100%)`,
-          borderBottom: `1px solid ${alpha(colors.primary, 0.1)}`,
-          borderRadius: 0,
-        }}
-      >
-        <Grid container spacing={3} alignItems="center">
-          <Grid item>
-            <Avatar
-              sx={{
-                width: 64,
-                height: 64,
-                background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`,
-              }}
-            >
-              <AnalyticsIcon sx={{ fontSize: 32 }} />
-            </Avatar>
-          </Grid>
-          <Grid item xs>
-            <Typography variant="h4" sx={{ color: colors.text, fontWeight: 700, mb: 1 }}>
-              Log Analysis
-            </Typography>
-            <Typography variant="body1" sx={{ color: colors.textSecondary }}>
-              Analyze security logs with AI-powered threat detection
-            </Typography>
-          </Grid>
-          <Grid item>
-            <Stack direction="row" spacing={1}>
-              <Tooltip title="Download Sample">
-                <IconButton sx={{ bgcolor: colors.surface, border: `1px solid ${alpha(colors.textSecondary, 0.2)}` }}>
-                  <DownloadIcon sx={{ color: colors.textSecondary }} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Share">
-                <IconButton sx={{ bgcolor: colors.surface, border: `1px solid ${alpha(colors.textSecondary, 0.2)}` }}>
-                  <ShareIcon sx={{ color: colors.textSecondary }} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Options">
-                <IconButton sx={{ bgcolor: colors.surface, border: `1px solid ${alpha(colors.textSecondary, 0.2)}` }}>
-                  <MoreVertIcon sx={{ color: colors.textSecondary }} />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          </Grid>
-        </Grid>
-      </Paper>
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-header-title">Threat Studio</h1>
+          <p className="page-header-sub">Submit any raw log — AI parses, detects, and scores threats in real time</p>
+        </div>
+      </div>
 
-      {/* Main Content */}
-      <Grid container spacing={3} sx={{ px: 3 }}>
-        {/* Input Section */}
-        <Grid item xs={12} md={5}>
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Card
-              sx={{
-                bgcolor: colors.surface,
-                border: `1px solid ${alpha(colors.primary, 0.2)}`,
-                borderRadius: 3,
-                boxShadow: `0 4px 6px -1px ${alpha(colors.text, 0.05)}`,
-              }}
-            >
-              <CardContent>
-                <Typography variant="h6" sx={{ color: colors.text, mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Badge
-                    color="primary"
-                    variant="dot"
-                    sx={{ '& .MuiBadge-badge': { bgcolor: colors.success } }}
-                  >
-                    <UploadIcon sx={{ color: colors.primary }} />
-                  </Badge>
-                  Input Security Log
-                </Typography>
-
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={6}
-                  variant="outlined"
-                  placeholder="Paste Windows Event Log, Linux Syslog, or any security log..."
-                  value={logInput}
-                  onChange={(e) => setLogInput(e.target.value)}
-                  sx={{
-                    mb: 2,
-                    '& .MuiOutlinedInput-root': {
-                      bgcolor: alpha(colors.background, 0.5),
-                      '& fieldset': {
-                        borderColor: alpha(colors.primary, 0.2),
-                      },
-                      '&:hover fieldset': {
-                        borderColor: colors.primary,
-                      },
-                    },
-                    '& .MuiInputBase-input': {
-                      color: colors.text,
-                    },
-                  }}
+      <div className="page-body">
+        <div className="studio-layout">
+          {/* Input Panel */}
+          <div className="studio-input-panel">
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Log Input</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {SAMPLE_LOGS.map((s, i) => (
+                    <button key={i} className="sample-btn" onClick={() => loadSample(s)} title={s.value}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="card-body">
+                <textarea
+                  className="log-textarea"
+                  placeholder={`Paste any raw log here and click Analyze.\n\nExamples:\n• Windows Event logs (Event ID 4625, 4624, 4688)\n• Syslog, Cisco ASA, Palo Alto firewall\n• AWS CloudTrail, Azure, GCP\n• IDS/IPS alerts, DNS logs`}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  rows={8}
+                  autoFocus
                 />
 
-                <Stack direction="row" spacing={1} sx={{ mb: 3, flexWrap: 'wrap', gap: 1 }}>
-                  {sampleLogs.map((sample, index) => (
-                    <Zoom in key={index} style={{ transitionDelay: `${index * 100}ms` }}>
-                      <Chip
-                        label={sample.label}
-                        onClick={() => setLogInput(sample.log)}
-                        sx={{
-                          bgcolor: alpha(sample.color, 0.05),
-                          color: sample.color,
-                          border: `1px solid ${alpha(sample.color, 0.2)}`,
-                          fontWeight: 500,
-                          '&:hover': {
-                            bgcolor: alpha(sample.color, 0.15),
-                          },
-                        }}
-                      />
-                    </Zoom>
-                  ))}
-                </Stack>
+                {error && <div className="auth-error" style={{ marginTop: 8 }}><span>⚠️</span> {error}</div>}
 
-                <Stack direction="row" spacing={2}>
-                  <Button
-                    variant="contained"
-                    onClick={handleAnalyze}
-                    disabled={loading || !logInput.trim()}
-                    size="large"
-                    startIcon={<PlayArrowIcon />}
-                    sx={{
-                      flex: 2,
-                      background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`,
-                      boxShadow: `0 4px 14px 0 ${alpha(colors.primary, 0.3)}`,
-                      py: 1.5,
-                    }}
-                  >
-                    Analyze Log
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleClear}
-                    size="large"
-                    startIcon={<ClearIcon />}
-                    sx={{
-                      flex: 1,
-                      borderColor: alpha(colors.textSecondary, 0.3),
-                      color: colors.textSecondary,
-                      '&:hover': {
-                        borderColor: colors.error,
-                        color: colors.error,
-                        bgcolor: alpha(colors.error, 0.05),
-                      },
-                    }}
-                  >
-                    Clear
-                  </Button>
-                </Stack>
+                <div className="studio-actions">
+                  <button className="btn-primary btn-large" onClick={analyze} disabled={loading || !input.trim()}>
+                    {loading ? <><span className="btn-spinner" />Processing Telemetry…</> : 'Execute AI Analysis'}
+                  </button>
+                  <button className="btn-outline" onClick={() => navigate('/reports')}>
+                    SOC Reports
+                  </button>
+                  {input && (
+                    <button className="btn-ghost" onClick={() => { setInput(''); setResult(null); setError(null); }}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
 
-                {loading && (
-                  <Box sx={{ mt: 3 }}>
-                    <LinearProgress
-                      sx={{
-                        bgcolor: alpha(colors.primary, 0.1),
-                        '& .MuiLinearProgress-bar': {
-                          background: `linear-gradient(90deg, ${colors.primary}, ${colors.secondary})`,
-                        },
-                      }}
-                    />
-                    <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'block', mt: 1, textAlign: 'center' }}>
-                      Analyzing with AI models...
-                    </Typography>
-                  </Box>
-                )}
-
-                {error && (
-                  <Fade in>
-                    <Alert
-                      severity="error"
-                      sx={{ mt: 3, bgcolor: alpha(colors.error, 0.05), color: colors.error }}
-                    >
-                      {error}
-                    </Alert>
-                  </Fade>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </Grid>
-
-        {/* Results Section */}
-        <Grid item xs={12} md={7}>
-          <AnimatePresence>
-            {result && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.5 }}
-              >
-                <Card
-                  sx={{
-                    bgcolor: colors.surface,
-                    border: `1px solid ${alpha(colors.success, 0.2)}`,
-                    borderRadius: 3,
-                    boxShadow: `0 10px 15px -3px ${alpha(colors.text, 0.05)}`,
-                  }}
-                >
-                  <CardContent>
-                    {/* Results Header */}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                      <Typography variant="h6" sx={{ color: colors.text, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <CheckCircleIcon sx={{ color: colors.success }} />
-                        Analysis Complete
-                      </Typography>
-                      <Tooltip title="Copy Results">
-                        <IconButton onClick={() => copyToClipboard(result)} sx={{ color: colors.textSecondary }}>
-                          <ContentCopyIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-
-                    {/* Tabs - Updated with AI Summary */}
-                    <Tabs
-                      value={activeTab}
-                      onChange={(e, v) => setActiveTab(v)}
-                      sx={{
-                        mb: 3,
-                        '& .MuiTab-root': { color: colors.textSecondary },
-                        '& .Mui-selected': { color: colors.primary },
-                        '& .MuiTabs-indicator': { bgcolor: colors.primary },
-                      }}
-                    >
-                      <Tab label="Overview" />
-                      <Tab label="Threat Details" />
-                      <Tab label="Intelligence" />
-                      <Tab label="AI Summary" />
-                      <Tab label="Map" />
-                    </Tabs>
-
-                    {/* Tab Panels */}
-                    <AnimatePresence mode="wait">
-                      {activeTab === 0 && (
-                        <motion.div
-                          key="overview"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                        >
-                          <Grid container spacing={2}>
-                            {/* Risk Level */}
-                            <Grid item xs={12} md={6}>
-                              <Paper
-                                sx={{
-                                  p: 2,
-                                  bgcolor: alpha(getSeverityColor(result.risk_assessment?.risk_level), 0.05),
-                                  border: `1px solid ${alpha(getSeverityColor(result.risk_assessment?.risk_level), 0.2)}`,
-                                  borderRadius: 2,
-                                  elevation: 0,
-                                }}
-                              >
-                                <Typography variant="subtitle2" sx={{ color: colors.textSecondary, mb: 1 }}>
-                                  Risk Level
-                                </Typography>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                  <Typography variant="h3" sx={{ color: getSeverityColor(result.risk_assessment?.risk_level) }}>
-                                    {result.risk_assessment?.risk_score}
-                                  </Typography>
-                                  <Chip
-                                    label={result.risk_assessment?.risk_level}
-                                    sx={{
-                                      bgcolor: alpha(getSeverityColor(result.risk_assessment?.risk_level), 0.1),
-                                      color: getSeverityColor(result.risk_assessment?.risk_level),
-                                      fontWeight: 600,
-                                    }}
-                                  />
-                                </Box>
-                              </Paper>
-                            </Grid>
-
-                            {/* Detection */}
-                            <Grid item xs={12} md={6}>
-                              <Paper
-                                sx={{
-                                  p: 2,
-                                  bgcolor: alpha(result.detection_result?.threat_detected ? colors.error : colors.success, 0.05),
-                                  border: `1px solid ${alpha(result.detection_result?.threat_detected ? colors.error : colors.success, 0.2)}`,
-                                  borderRadius: 2,
-                                  elevation: 0,
-                                }}
-                              >
-                                <Typography variant="subtitle2" sx={{ color: colors.textSecondary, mb: 1 }}>
-                                  Threat Detection
-                                </Typography>
-                                <Typography variant="h6" sx={{ color: result.detection_result?.threat_detected ? colors.error : colors.success }}>
-                                  {result.detection_result?.threat_detected || 'No Threat Detected'}
-                                </Typography>
-                                {result.detection_result?.confidence && (
-                                  <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                                    Confidence: {(result.detection_result.confidence * 100).toFixed(0)}%
-                                  </Typography>
-                                )}
-                              </Paper>
-                            </Grid>
-
-                            {/* Parsed Log */}
-                            <Grid item xs={12}>
-                              <Paper sx={{ p: 2, bgcolor: alpha(colors.info, 0.05), border: `1px solid ${alpha(colors.info, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                                <Typography variant="subtitle2" sx={{ color: colors.textSecondary, mb: 2 }}>
-                                  Parsed Log Details
-                                </Typography>
-                                <Grid container spacing={2}>
-                                  {Object.entries(result.parsed_log || {}).map(([key, value]) => (
-                                    key !== 'raw' && (
-                                      <Grid item xs={6} md={4} key={key}>
-                                        <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'block' }}>
-                                          {key.replace('_', ' ').toUpperCase()}
-                                        </Typography>
-                                        <Typography variant="body2" sx={{ color: colors.text, fontWeight: 600 }}>
-                                          {value || 'N/A'}
-                                        </Typography>
-                                      </Grid>
-                                    )
-                                  ))}
-                                </Grid>
-                              </Paper>
-                            </Grid>
-                          </Grid>
-                        </motion.div>
-                      )}
-
-                      {activeTab === 1 && (
-                        <motion.div
-                          key="threat"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                        >
-                          <Stack spacing={2}>
-                            {/* MITRE Technique */}
-                            {result.mitre_details && (
-                              <Paper sx={{ p: 2, bgcolor: alpha(colors.purple, 0.05), border: `1px solid ${alpha(colors.purple, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                                  <LocalPoliceIcon sx={{ color: colors.purple }} />
-                                  <Typography variant="subtitle2" sx={{ color: colors.purple }}>
-                                    MITRE ATT&CK Technique
-                                  </Typography>
-                                </Box>
-                                <Chip
-                                  label={result.mitre_details.id}
-                                  size="small"
-                                  sx={{ bgcolor: alpha(colors.purple, 0.1), color: colors.purple, mb: 1, fontWeight: 500 }}
-                                />
-                                <Typography variant="subtitle1" sx={{ color: colors.text, mb: 1 }}>
-                                  {result.mitre_details.name}
-                                </Typography>
-                                <Typography variant="body2" sx={{ color: colors.textSecondary }}>
-                                  {result.mitre_details.description}
-                                </Typography>
-                              </Paper>
-                            )}
-
-                            {/* CVEs */}
-                            {result.related_cves && result.related_cves.length > 0 && (
-                              <Paper sx={{ p: 2, bgcolor: alpha(colors.error, 0.05), border: `1px solid ${alpha(colors.error, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                                  <BugReportIcon sx={{ color: colors.error }} />
-                                  <Typography variant="subtitle2" sx={{ color: colors.error }}>
-                                    Related CVEs
-                                  </Typography>
-                                </Box>
-                                {result.related_cves.map((cve, index) => (
-                                  <Box key={index} sx={{ mb: index < result.related_cves.length - 1 ? 2 : 0 }}>
-                                    <Typography variant="body2" sx={{ color: colors.text, fontWeight: 600 }}>
-                                      {cve.cve_id} {cve.cvss_score && `(CVSS: ${cve.cvss_score})`}
-                                    </Typography>
-                                    <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                                      {cve.description}
-                                    </Typography>
-                                  </Box>
-                                ))}
-                              </Paper>
-                            )}
-                          </Stack>
-                        </motion.div>
-                      )}
-
-                      {activeTab === 2 && (
-                        <motion.div
-                          key="intel"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                        >
-                          {result.ip_intelligence && (
-                            <Paper sx={{ p: 2, bgcolor: alpha(colors.teal, 0.05), border: `1px solid ${alpha(colors.teal, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-                                <PublicIcon sx={{ color: colors.teal }} />
-                                <Typography variant="subtitle2" sx={{ color: colors.teal }}>
-                                  IP Intelligence
-                                </Typography>
-                              </Box>
-
-                              <Grid container spacing={2}>
-                                <Grid item xs={12}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                    <Avatar sx={{ bgcolor: alpha(colors.teal, 0.1), color: colors.teal }}>
-                                      <ComputerIcon />
-                                    </Avatar>
-                                    <Box>
-                                      <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                                        IP Address
-                                      </Typography>
-                                      <Typography variant="h6" sx={{ color: colors.text }}>
-                                        {result.ip_intelligence.ip}
-                                      </Typography>
-                                    </Box>
-                                  </Box>
-                                </Grid>
-
-                                {result.ip_intelligence.geo && (
-                                  <>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'block' }}>
-                                        Country
-                                      </Typography>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <FlagIcon sx={{ fontSize: 16, color: colors.teal }} />
-                                        <Typography variant="body2" sx={{ color: colors.text }}>
-                                          {result.ip_intelligence.geo.country}
-                                        </Typography>
-                                      </Box>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'block' }}>
-                                        City
-                                      </Typography>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <LocationIcon sx={{ fontSize: 16, color: colors.teal }} />
-                                        <Typography variant="body2" sx={{ color: colors.text }}>
-                                          {result.ip_intelligence.geo.city}
-                                        </Typography>
-                                      </Box>
-                                    </Grid>
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'block' }}>
-                                        ISP
-                                      </Typography>
-                                      <Typography variant="body2" sx={{ color: colors.text }}>
-                                        {result.ip_intelligence.geo.isp}
-                                      </Typography>
-                                    </Grid>
-                                  </>
-                                )}
-
-                                {result.ip_intelligence.reputation && (
-                                  <Grid item xs={12}>
-                                    <Divider sx={{ my: 2, borderColor: alpha(colors.teal, 0.1) }} />
-                                    <Typography variant="subtitle2" sx={{ color: colors.teal, mb: 2 }}>
-                                      Reputation Score
-                                    </Typography>
-                                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                                      <Chip
-                                        label={`Malicious: ${result.ip_intelligence.reputation.malicious}`}
-                                        size="small"
-                                        sx={{ bgcolor: alpha(colors.error, 0.1), color: colors.error, fontWeight: 500 }}
-                                      />
-                                      <Chip
-                                        label={`Suspicious: ${result.ip_intelligence.reputation.suspicious}`}
-                                        size="small"
-                                        sx={{ bgcolor: alpha(colors.warning, 0.1), color: colors.warning, fontWeight: 500 }}
-                                      />
-                                      <Chip
-                                        label={`Harmless: ${result.ip_intelligence.reputation.harmless}`}
-                                        size="small"
-                                        sx={{ bgcolor: alpha(colors.success, 0.1), color: colors.success, fontWeight: 500 }}
-                                      />
-                                    </Stack>
-                                  </Grid>
-                                )}
-                              </Grid>
-                            </Paper>
-                          )}
-                        </motion.div>
-                      )}
-
-                      {/* AI Summary Tab - New */}
-                      {activeTab === 3 && (
-                        <motion.div
-                          key="ai-summary"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                        >
-                          <Paper 
-                            sx={{ 
-                              p: 3, 
-                              bgcolor: alpha(colors.primary, 0.02),
-                              border: `1px solid ${alpha(colors.primary, 0.2)}`,
-                              borderRadius: 2,
-                              elevation: 0,
-                            }}
-                          >
-                            {/* Header with AI icon */}
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 4 }}>
-                              <Avatar 
-                                sx={{ 
-                                  bgcolor: alpha(colors.primary, 0.1),
-                                  color: colors.primary,
-                                  width: 48,
-                                  height: 48,
-                                }}
-                              >
-                                <PsychologyIcon />
-                              </Avatar>
-                              <Box>
-                                <Typography variant="h6" sx={{ color: colors.text, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  AI SOC Summary
-                                  <Chip
-                                    icon={<AutoAwesomeIcon />}
-                                    label="AI-Powered Analysis"
-                                    size="small"
-                                    sx={{
-                                      bgcolor: alpha(colors.primary, 0.1),
-                                      color: colors.primary,
-                                      ml: 1,
-                                    }}
-                                  />
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                                  Generated by LLaMA 3.1 • Real-time analysis
-                                </Typography>
-                              </Box>
-                            </Box>
-
-                            {result.soc_summary && !result.soc_summary.error ? (
-                              <Grid container spacing={3}>
-                                {/* Executive Summary */}
-                                <Grid item xs={12}>
-                                  <Paper
-                                    elevation={0}
-                                    sx={{
-                                      p: 2.5,
-                                      bgcolor: alpha(colors.info, 0.03),
-                                      border: `1px solid ${alpha(colors.info, 0.2)}`,
-                                      borderRadius: 2,
-                                    }}
-                                  >
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                                      <InfoIcon sx={{ color: colors.info, fontSize: 20 }} />
-                                      <Typography variant="subtitle2" sx={{ color: colors.info, fontWeight: 600 }}>
-                                        Executive Summary
-                                      </Typography>
-                                    </Box>
-                                    <Typography variant="body1" sx={{ color: colors.text, lineHeight: 1.6 }}>
-                                      {result.soc_summary.executive_summary || "Potential security incident detected involving IP address from Germany, with a low risk score."}
-                                    </Typography>
-                                  </Paper>
-                                </Grid>
-
-                                {/* Business Impact */}
-                                <Grid item xs={12}>
-                                  <Paper
-                                    elevation={0}
-                                    sx={{
-                                      p: 2.5,
-                                      bgcolor: alpha(colors.warning, 0.03),
-                                      border: `1px solid ${alpha(colors.warning, 0.2)}`,
-                                      borderRadius: 2,
-                                    }}
-                                  >
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                                      <WarningIcon sx={{ color: colors.warning, fontSize: 20 }} />
-                                      <Typography variant="subtitle2" sx={{ color: colors.warning, fontWeight: 600 }}>
-                                        Business Impact
-                                      </Typography>
-                                    </Box>
-                                    <Typography variant="body1" sx={{ color: colors.text, lineHeight: 1.6 }}>
-                                      {result.soc_summary.business_impact || "The business impact of this incident is currently low due to the low risk score and lack of malicious reputation associated with the IP address."}
-                                    </Typography>
-                                  </Paper>
-                                </Grid>
-
-                                {/* Recommended Actions */}
-                                <Grid item xs={12}>
-                                  <Paper
-                                    elevation={0}
-                                    sx={{
-                                      p: 2.5,
-                                      bgcolor: alpha(colors.success, 0.03),
-                                      border: `1px solid ${alpha(colors.success, 0.2)}`,
-                                      borderRadius: 2,
-                                    }}
-                                  >
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                                      <CheckCircleIcon sx={{ color: colors.success, fontSize: 20 }} />
-                                      <Typography variant="subtitle2" sx={{ color: colors.success, fontWeight: 600 }}>
-                                        Recommended Actions
-                                      </Typography>
-                                    </Box>
-                                    <Box component="ul" sx={{ m: 0, pl: 2, color: colors.text }}>
-                                      {Array.isArray(result.soc_summary.recommended_actions) ? (
-                                        result.soc_summary.recommended_actions.map((action, idx) => (
-                                          <li key={idx}>
-                                            <Typography variant="body1" sx={{ color: colors.text, lineHeight: 1.8 }}>
-                                              {action}
-                                            </Typography>
-                                          </li>
-                                        ))
-                                      ) : (
-                                        <li>
-                                          <Typography variant="body1" sx={{ color: colors.text, lineHeight: 1.8 }}>
-                                            {result.soc_summary.recommended_actions || "Monitor the IP for any further suspicious activity."}
-                                          </Typography>
-                                        </li>
-                                      )}
-                                    </Box>
-                                  </Paper>
-                                </Grid>
-
-                                {/* Confidence Score */}
-                                <Grid item xs={12}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, mt: 1 }}>
-                                    <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                                      AI Confidence:
-                                    </Typography>
-                                    <Rating 
-                                      value={4.5} 
-                                      precision={0.5} 
-                                      readOnly 
-                                      size="small"
-                                      sx={{ color: colors.primary }}
-                                    />
-                                    <Chip
-                                      label="High Confidence"
-                                      size="small"
-                                      sx={{ bgcolor: alpha(colors.success, 0.1), color: colors.success }}
-                                    />
-                                  </Box>
-                                </Grid>
-                              </Grid>
-                            ) : (
-                              <Box sx={{ textAlign: 'center', py: 4 }}>
-                                <PsychologyIcon sx={{ fontSize: 48, color: alpha(colors.textSecondary, 0.5), mb: 2 }} />
-                                <Typography variant="body1" sx={{ color: colors.textSecondary }}>
-                                  No AI summary available for this log
-                                </Typography>
-                              </Box>
-                            )}
-                          </Paper>
-                        </motion.div>
-                      )}
-
-                      {/* Map Tab - Moved to Tab 4 (index 4) */}
-                      {activeTab === 4 && (
-                        <motion.div
-                          key="map"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                        >
-                          <Paper sx={{ p: 2, bgcolor: colors.elevated, borderRadius: 2, elevation: 0 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                              <Typography variant="subtitle2" sx={{ color: colors.teal, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <MapIcon />
-                                Attack Origin Map
-                              </Typography>
-                              <Stack direction="row" spacing={1}>
-                                <Chip
-                                  label="Standard"
-                                  size="small"
-                                  onClick={() => setMapView('standard')}
-                                  sx={{
-                                    bgcolor: mapView === 'standard' ? colors.primary : colors.surface,
-                                    color: mapView === 'standard' ? 'white' : colors.textSecondary,
-                                    border: `1px solid ${alpha(colors.textSecondary, 0.2)}`,
-                                  }}
-                                />
-                                <Chip
-                                  label="Satellite"
-                                  size="small"
-                                  onClick={() => setMapView('satellite')}
-                                  sx={{
-                                    bgcolor: mapView === 'satellite' ? colors.primary : colors.surface,
-                                    color: mapView === 'satellite' ? 'white' : colors.textSecondary,
-                                    border: `1px solid ${alpha(colors.textSecondary, 0.2)}`,
-                                  }}
-                                />
-                              </Stack>
-                            </Box>
-
-                            <Box sx={{ height: 300, borderRadius: 2, overflow: 'hidden', border: `1px solid ${alpha(colors.textSecondary, 0.1)}` }}>
-                              {result.ip_intelligence?.ip ? (
-                                <MapContainer
-                                  center={[getIpLocation(result.ip_intelligence.ip).lat, getIpLocation(result.ip_intelligence.ip).lng]}
-                                  zoom={4}
-                                  style={{ height: '100%', width: '100%' }}
-                                >
-                                  <TileLayer
-                                    url={mapView === 'standard'
-                                      ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                                      : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-                                    }
-                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                                  />
-                                  <CircleMarker
-                                    center={[getIpLocation(result.ip_intelligence.ip).lat, getIpLocation(result.ip_intelligence.ip).lng]}
-                                    radius={15}
-                                    fillColor={colors.error}
-                                    color={colors.error}
-                                    weight={2}
-                                    opacity={0.8}
-                                    fillOpacity={0.3}
-                                  >
-                                    <Popup>
-                                      <Typography variant="body2" sx={{ color: '#000' }}>
-                                        <strong>Source IP: {result.ip_intelligence.ip}</strong><br />
-                                        {getIpLocation(result.ip_intelligence.ip).city}, {getIpLocation(result.ip_intelligence.ip).country}<br />
-                                        Threat: {result.detection_result?.threat_detected || 'Unknown'}
-                                      </Typography>
-                                    </Popup>
-                                  </CircleMarker>
-                                  <Marker
-                                    position={[getIpLocation(result.ip_intelligence.ip).lat, getIpLocation(result.ip_intelligence.ip).lng]}
-                                  >
-                                    <Popup>
-                                      <Typography variant="body2" sx={{ color: '#000' }}>
-                                        <strong>Attack Origin</strong><br />
-                                        IP: {result.ip_intelligence.ip}<br />
-                                        Location: {getIpLocation(result.ip_intelligence.ip).city}, {getIpLocation(result.ip_intelligence.ip).country}
-                                      </Typography>
-                                    </Popup>
-                                  </Marker>
-                                </MapContainer>
-                              ) : (
-                                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: alpha(colors.textSecondary, 0.05) }}>
-                                  <Typography color={colors.textSecondary}>No location data available</Typography>
-                                </Box>
-                              )}
-                            </Box>
-
-                            {result.ip_intelligence?.geo && (
-                              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 2 }}>
-                                <Chip
-                                  icon={<LocationIcon />}
-                                  label={`${result.ip_intelligence.geo.city}, ${result.ip_intelligence.geo.country}`}
-                                  sx={{ bgcolor: alpha(colors.teal, 0.1), color: colors.teal, fontWeight: 500 }}
-                                />
-                                <Chip
-                                  icon={<ComputerIcon />}
-                                  label={result.ip_intelligence.ip}
-                                  sx={{ bgcolor: alpha(colors.teal, 0.1), color: colors.teal, fontWeight: 500 }}
-                                />
-                              </Box>
-                            )}
-                          </Paper>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </CardContent>
-                </Card>
-              </motion.div>
+            {/* Parsed Fields Preview */}
+            {result?.parsed_log && (
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="card-header">
+                  <span className="card-title">Parsed Fields</span>
+                  <span className="rule-chip">{result.parsed_log.log_type || 'unknown'} format</span>
+                </div>
+                <div className="card-body" style={{ padding: '12px 20px' }}>
+                  <div className="parsed-grid">
+                    <ParsedField label="Source IP" value={result.parsed_log.source_ip} mono />
+                    <ParsedField label="Dest IP" value={result.parsed_log.dest_ip} mono />
+                    <ParsedField label="Event ID" value={result.parsed_log.event_id} mono />
+                    <ParsedField label="User" value={result.parsed_log.user} />
+                    <ParsedField label="Status" value={result.parsed_log.status} />
+                    <ParsedField label="Process" value={result.parsed_log.process} mono />
+                    <ParsedField label="Port" value={result.parsed_log.port} mono />
+                    <ParsedField label="Hostname" value={result.parsed_log.hostname} />
+                  </div>
+                </div>
+              </div>
             )}
-          </AnimatePresence>
-        </Grid>
-      </Grid>
-    </Box>
-  );
-};
+          </div>
 
-export default LogAnalysis;
+          {/* Results Panel */}
+          {result && (
+            <div className="studio-results-panel">
+              {/* Risk Overview */}
+              <div className="card risk-overview-card">
+                <div className="risk-overview-left">
+                  <RiskGauge score={result.risk_score} />
+                </div>
+                <div className="risk-overview-right">
+                  <div className="risk-threat-type">{result.threat_type || 'Unknown Threat'}</div>
+                  <div className="risk-summary">{result.summary || result.analysis_summary}</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                    {result.mitre_technique && (
+                      <span className="mitre-tag" title="Click to investigate in MITRE Explorer" style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/mitre?id=${result.mitre_technique}`)}>
+                        {result.mitre_technique}
+                      </span>
+                    )}
+                    {result.campaign_id && <span className="rule-chip" style={{ color: 'var(--warning)' }}>Campaign #{result.campaign_id}</span>}
+                    {result.is_multi_stage && <span className="rule-chip" style={{ color: 'var(--danger)' }}>Multi-Stage</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="filter-tabs" style={{ marginTop: 12, marginBottom: 12 }}>
+                {['overview', 'intel', 'factors', 'soar', 'raw'].map(t => (
+                  <button key={t} className={`filter-tab ${activeTab === t ? 'ft-active' : ''}`} onClick={() => setActiveTab(t)}>
+                    {{ overview: 'Executive Summary', intel: 'Global Threat Intel', factors: 'Behavioral Heuristics', soar: 'Automated SOAR Actions', raw: 'Telemetry Object' }[t]}
+                  </button>
+                ))}
+              </div>
+
+              {activeTab === 'overview' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="card">
+                    <div className="card-header"><span className="card-title">Threat Details</span></div>
+                    <div className="card-body" style={{ padding: '12px 20px' }}>
+                      <ParsedField label="Threat Type" value={result.threat_type} />
+                      <ParsedField label="Confidence" value={result.confidence ? `${(result.confidence * 100).toFixed(0)}%` : null} />
+                      <ParsedField label="Status" value={result.status} />
+                      <ParsedField label="Source IP" value={result.source_ip} mono />
+                      <ParsedField label="MITRE Tactic" value={result.mitre_tactic} />
+                      <ParsedField label="CVE" value={result.cve_id} mono />
+                    </div>
+                  </div>
+                  <div className="card">
+                    <div className="card-header"><span className="card-title">Intelligence Checks</span></div>
+                    <div className="card-body" style={{ padding: '12px 20px' }}>
+                      <div className="intel-check">
+                        <span className={`check-dot ${result.on_blocklist ? 'cd-bad' : 'cd-ok'}`} />
+                        <span>{result.on_blocklist ? 'IP on BLOCKLIST' : 'IP not on blocklist'}</span>
+                      </div>
+                      <div className="intel-check">
+                        <span className={`check-dot ${result.ioc_match ? 'cd-bad' : 'cd-ok'}`} />
+                        <span>{result.ioc_match ? 'IOC match found in threat intel' : 'No IOC match'}</span>
+                      </div>
+                      <div className="intel-check">
+                        <span className={`check-dot ${result.campaign_id ? 'cd-warn' : 'cd-ok'}`} />
+                        <span>{result.campaign_id ? `Linked to campaign #${result.campaign_id}` : 'No active campaign'}</span>
+                      </div>
+                      <div className="intel-check">
+                        <span className={`check-dot ${result.is_multi_stage ? 'cd-warn' : 'cd-ok'}`} />
+                        <span>{result.is_multi_stage ? 'Multi-stage attack detected' : 'Single-stage event'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {result.full_analysis && (
+                    <div className="card" style={{ gridColumn: 'span 2' }}>
+                      <div className="card-header"><span className="card-title">AI SOC Analyst Report</span></div>
+                      <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20, padding: '24px' }}>
+                        <div style={{ padding: '16px', background: 'rgba(99, 102, 241, 0.05)', borderRadius: 8, borderLeft: '4px solid var(--accent-primary)' }}>
+                          <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', fontSize: 15 }}>Technical Analysis</h4>
+                          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{result.full_analysis.technical_analysis}</p>
+                        </div>
+                        <div style={{ padding: '16px', background: 'rgba(244, 63, 94, 0.05)', borderRadius: 8, borderLeft: '4px solid var(--danger)' }}>
+                          <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', fontSize: 15 }}>Business Impact</h4>
+                          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{result.full_analysis.business_impact}</p>
+                        </div>
+                        <div style={{ padding: '16px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: 8, borderLeft: '4px solid var(--warning)' }}>
+                          <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', fontSize: 15 }}>Recommended Actions</h4>
+                          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{result.full_analysis.recommended_actions}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'intel' && (
+                <div className="card">
+                  <div className="card-header"><span className="card-title">IP Geolocation & Reputation</span></div>
+                  <div className="card-body" style={{ padding: '20px' }}>
+                    {!result.ip_intelligence ? (
+                      <div className="empty-state">
+                        <span className="empty-title">No IP Intelligence Available</span>
+                        <span className="empty-sub">This log may not contain a valid external source IP address.</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          <div style={{ padding: 16, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--text-secondary)' }}>Geolocation Details</h4>
+                            <div className="parsed-grid">
+                              <ParsedField label="IP Address" value={result.ip_intelligence.ip} mono />
+                              <ParsedField label="Country" value={`${result.ip_intelligence.geo?.country} ${result.ip_intelligence.geo?.flag || ''}`} />
+                              <ParsedField label="City" value={result.ip_intelligence.geo?.city} />
+                              <ParsedField label="ISP / Org" value={result.ip_intelligence.geo?.isp || result.ip_intelligence.geo?.org} />
+                              <ParsedField label="Coordinates" value={`${result.ip_intelligence.geo?.lat}, ${result.ip_intelligence.geo?.lon}`} mono />
+                              <ParsedField label="Source" value={result.ip_intelligence.geo?.source} />
+                            </div>
+                          </div>
+                          <div style={{ padding: 16, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--text-secondary)' }}>VirusTotal Reputation</h4>
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              <div style={{ textAlign: 'center', padding: '12px 24px', background: 'rgba(244, 63, 94, 0.1)', borderRadius: 8, border: '1px solid rgba(244, 63, 94, 0.2)' }}>
+                                <div style={{ fontSize: 24, fontWeight: 'bold', color: 'var(--danger)' }}>{result.ip_intelligence.reputation?.malicious || 0}</div>
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Malicious</div>
+                              </div>
+                              <div style={{ textAlign: 'center', padding: '12px 24px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                                <div style={{ fontSize: 24, fontWeight: 'bold', color: 'var(--warning)' }}>{result.ip_intelligence.reputation?.suspicious || 0}</div>
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Suspicious</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ height: 350, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                          {result.ip_intelligence.geo?.lat !== undefined ? (
+                            <MapContainer 
+                              key={`${result.ip_intelligence.geo.lat}-${result.ip_intelligence.geo.lon}-${result.source_ip}`}
+                              center={[result.ip_intelligence.geo.lat, result.ip_intelligence.geo.lon]} 
+                              zoom={result.ip_intelligence.geo.lat === 0 ? 2 : 5} 
+                              style={{ height: '100%', width: '100%' }}
+                            >
+                              <TileLayer
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                attribution="&copy; OpenStreetMap contributors"
+                              />
+                              <Marker position={[result.ip_intelligence.geo.lat, result.ip_intelligence.geo.lon]}>
+                                <Popup>
+                                  <strong>{result.ip_intelligence.ip}</strong><br />
+                                  {result.ip_intelligence.geo.city}, {result.ip_intelligence.geo.country}
+                                </Popup>
+                              </Marker>
+                            </MapContainer>
+                          ) : (
+                            <div className="empty-state" style={{ height: '100%' }}><span className="empty-title">Map Unavailable</span></div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'factors' && (
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Risk Factor Breakdown</span></div>
+                  <div className="card-body">
+                    {result.risk_factors?.length ? (
+                      <RiskFactors factors={result.risk_factors} />
+                    ) : (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>No detailed risk factor breakdown available.</p>
+                    )}
+                    {result.confidence_reasons?.length > 0 && (
+                      <div style={{ marginTop: 16 }}>
+                        <div className="detail-label" style={{ marginBottom: 8 }}>Detection Confidence Reasons</div>
+                        {result.confidence_reasons.map((r, i) => (
+                          <div key={i} className="intel-check"><span className="check-dot cd-warn" /><span>{r}</span></div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'soar' && (
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Automated SOAR Response</span></div>
+                  <div className="card-body">
+                    {result.soar_actions?.length ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {result.soar_actions.map((a, i) => (
+                          <div key={i} className="soar-action-item">
+                            <span className="soar-action-type rule-chip rule-chip-action">{a.action}</span>
+                            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{a.detail || a.result || 'Executed'}</span>
+                            <span className={`soar-action-status ${a.status === 'success' ? 'sas-ok' : 'sas-fail'}`}>{a.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-state" style={{ padding: 32 }}>
+                        <span className="empty-title">No SOAR rules fired</span>
+                        <span className="empty-sub">Configure SOAR rules in the SOAR & Automation page.</span>
+                        <button className="btn-outline" onClick={() => navigate('/soar')} style={{ marginTop: 12 }}>Go to SOAR →</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'raw' && (
+                <div className="card">
+                  <div className="card-header">
+                    <span className="card-title">Raw API Response</span>
+                    <button className="mitre-action-btn" onClick={() => navigator.clipboard.writeText(JSON.stringify(result.raw_result || result, null, 2))}>📋 Copy JSON</button>
+                  </div>
+                  <div className="card-body">
+                    <pre className="raw-json">{JSON.stringify(result.raw_result || result, null, 2)}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

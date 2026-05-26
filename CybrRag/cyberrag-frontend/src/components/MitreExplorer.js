@@ -1,478 +1,234 @@
-// src/components/MitreExplorer.js
+// src/components/MitreExplorer.js — New design, no MUI
 import React, { useState } from 'react';
-import {
-  Grid,
-  Paper,
-  Typography,
-  TextField,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Box,
-  alpha,
-  Avatar,
-  Stack,
-  IconButton,
-  Tooltip,
-  InputAdornment,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
-  Fade,
-  Zoom,
-  Badge,
-  Alert,
-} from '@mui/material';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Search as SearchIcon,
-  Security as SecurityIcon,
-  LocalPolice as LocalPoliceIcon,
-  BugReport as BugReportIcon,
-  Info as InfoIcon,
-  ContentCopy as ContentCopyIcon,
-  Bookmark as BookmarkIcon,
-  BookmarkBorder as BookmarkBorderIcon,
-  Share as ShareIcon,
-  Download as DownloadIcon,
-  MenuBook as MenuBookIcon,
-  ArrowForward as ArrowForwardIcon,
-  Clear as ClearIcon,
-  History as HistoryIcon,
-} from '@mui/icons-material';
 import { getMitreTechnique } from '../services/api';
+import '../styles/globals.css';
+import './AppShell.css';
+import './MitreExplorer.css';
 
-const colors = {
-  primary: '#4f46e5', // Slightly deeper indigo for light mode contrast
-  secondary: '#7c3aed',
-  accent: '#db2777',
-  success: '#059669',
-  warning: '#d97706',
-  error: '#dc2626',
-  info: '#2563eb',
-  purple: '#7c3aed',
-  background: '#f8fafc', // Light slate background
-  surface: '#ffffff',    // White cards
-  text: '#1e293b',       // Dark slate text
-  textSecondary: '#64748b', // Muted slate text
-};
+const COMMON_TECHNIQUES = [
+  { id: 'T1110', name: 'Brute Force', tactic: 'Credential Access', severity: 'HIGH' },
+  { id: 'T1059', name: 'Command & Scripting Interpreter', tactic: 'Execution', severity: 'CRITICAL' },
+  { id: 'T1003', name: 'OS Credential Dumping', tactic: 'Credential Access', severity: 'CRITICAL' },
+  { id: 'T1566', name: 'Phishing', tactic: 'Initial Access', severity: 'HIGH' },
+  { id: 'T1021', name: 'Remote Services', tactic: 'Lateral Movement', severity: 'HIGH' },
+  { id: 'T1486', name: 'Data Encrypted for Impact', tactic: 'Impact', severity: 'CRITICAL' },
+  { id: 'T1078', name: 'Valid Accounts', tactic: 'Defense Evasion', severity: 'MEDIUM' },
+  { id: 'T1071', name: 'Application Layer Protocol', tactic: 'Command and Control', severity: 'MEDIUM' },
+];
 
-const MitreExplorer = () => {
-  const [techniqueId, setTechniqueId] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function MitreExplorer() {
+  const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [savedTechniques, setSavedTechniques] = useState([]);
-  const [recentSearches, setRecentSearches] = useState([]);
+  const [saved, setSaved] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [copied, setCopied] = useState(false);
 
-  const commonTechniques = [
-    { id: 'T1110', name: 'Brute Force', description: 'Attempt to gain access by trying multiple passwords', color: colors.error },
-    { id: 'T1059', name: 'Command and Scripting Interpreter', description: 'Execute commands through scripting interfaces', color: colors.purple },
-    { id: 'T1003', name: 'OS Credential Dumping', description: 'Extract credentials from operating systems', color: colors.warning },
-    { id: 'T1566', name: 'Phishing', description: 'Social engineering to obtain credentials', color: colors.info },
-    { id: 'T1486', name: 'Data Encrypted for Impact', description: 'Ransomware and data encryption attacks', color: colors.accent },
-  ];
-
-  const handleSearch = async () => {
-    if (!techniqueId.trim()) return;
-
-    setLoading(true);
-    setError(null);
+  const search = async (id) => {
+    const tid = (id || query).trim().toUpperCase();
+    if (!tid) return;
+    setLoading(true); setError(null); setResult(null);
     try {
-      const data = await getMitreTechnique(techniqueId);
-      if (data.error) {
-        setError(data.error);
-        setResult(null);
-      } else {
+      const data = await getMitreTechnique(tid);
+      if (data.error) { setError(data.error); }
+      else {
         setResult(data);
-        setRecentSearches(prev => [techniqueId, ...prev.filter(t => t !== techniqueId)].slice(0, 5));
+        setRecent(r => [tid, ...r.filter(t => t !== tid)].slice(0, 5));
       }
-    } catch (err) {
-      setError('Failed to fetch MITRE technique. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClear = () => {
-    setTechniqueId('');
-    setResult(null);
-    setError(null);
+    } catch { setError('Failed to fetch technique. Check backend connection.'); }
+    finally { setLoading(false); }
   };
 
   const toggleSave = (technique) => {
-    if (savedTechniques.find(t => t.id === technique.id)) {
-      setSavedTechniques(prev => prev.filter(t => t.id !== technique.id));
-    } else {
-      setSavedTechniques(prev => [technique, ...prev].slice(0, 10));
-    }
+    setSaved(s => s.find(t => t.id === technique.id) ? s.filter(t => t.id !== technique.id) : [...s, technique]);
   };
+  const isSaved = (id) => saved.some(t => t.id === id);
 
-  const copyToClipboard = (text) => {
+  const copy = (text) => {
     navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (
-    <Box sx={{ bgcolor: colors.background, minHeight: '100vh' }}>
-      {/* Header */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          mb: 3,
-          background: `linear-gradient(135deg, ${alpha(colors.purple, 0.1)} 0%, ${alpha(colors.primary, 0.05)} 100%)`,
-          borderBottom: `1px solid ${alpha(colors.purple, 0.1)}`,
-          borderRadius: 0,
-        }}
-      >
-        <Grid container spacing={3} alignItems="center">
-          <Grid item>
-            <Avatar
-              sx={{
-                width: 64,
-                height: 64,
-                background: `linear-gradient(135deg, ${colors.purple}, ${colors.primary})`,
-              }}
-            >
-              <MenuBookIcon sx={{ fontSize: 32 }} />
-            </Avatar>
-          </Grid>
-          <Grid item xs>
-            <Typography variant="h4" sx={{ color: colors.text, fontWeight: 700, mb: 1 }}>
-              MITRE ATT&CK Explorer
-            </Typography>
-            <Typography variant="body1" sx={{ color: colors.textSecondary }}>
-              Explore and analyze adversary tactics and techniques
-            </Typography>
-          </Grid>
-          <Grid item>
-            <Badge badgeContent={savedTechniques.length} color="primary">
-              <IconButton sx={{ bgcolor: colors.surface, border: `1px solid ${alpha(colors.textSecondary, 0.2)}` }}>
-                <BookmarkIcon sx={{ color: colors.textSecondary }} />
-              </IconButton>
-            </Badge>
-          </Grid>
-        </Grid>
-      </Paper>
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-header-title">MITRE ATT&amp;CK Explorer</h1>
+          <p className="page-header-sub">Explore adversary tactics, techniques, and procedures</p>
+        </div>
+        {saved.length > 0 && (
+          <div className="saved-badge">
+            🔖 {saved.length} saved technique{saved.length > 1 ? 's' : ''}
+          </div>
+        )}
+      </div>
 
-      {/* Main Content */}
-      <Grid container spacing={3} sx={{ px: 3 }}>
-        {/* Left Panel - Search & Common Techniques */}
-        <Grid item xs={12} md={4}>
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Card
-              sx={{
-                bgcolor: colors.surface,
-                border: `1px solid ${alpha(colors.purple, 0.2)}`,
-                borderRadius: 3,
-                mb: 3,
-                boxShadow: `0 4px 6px -1px ${alpha(colors.text, 0.05)}`,
-              }}
-            >
-              <CardContent>
-                <Typography variant="h6" sx={{ color: colors.text, mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SearchIcon sx={{ color: colors.purple }} />
-                  Search Technique
-                </Typography>
+      <div className="page-body">
+        <div className="mitre-layout">
+          {/* Left panel */}
+          <div className="mitre-left">
+            {/* Search */}
+            <div className="card" style={{ marginBottom: 12 }}>
+              <div className="card-header"><span className="card-title">Search Technique</span></div>
+              <div className="card-body">
+                <div className="mitre-search">
+                  <input
+                    className="field-input"
+                    placeholder="Enter MITRE ID (e.g. T1110)"
+                    value={query}
+                    onChange={e => setQuery(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && search()}
+                  />
+                  <button className="btn-primary" onClick={() => search()} disabled={loading || !query.trim()}>
+                    {loading ? <span className="btn-spinner" /> : 'Search'}
+                  </button>
+                </div>
 
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  placeholder="Enter MITRE ID (e.g., T1110)"
-                  value={techniqueId}
-                  onChange={(e) => setTechniqueId(e.target.value.toUpperCase())}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <LocalPoliceIcon sx={{ color: colors.purple }} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: techniqueId && (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={handleClear}>
-                          <ClearIcon fontSize="small" />
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{
-                    mb: 2,
-                    '& .MuiOutlinedInput-root': {
-                      bgcolor: alpha(colors.background, 0.5),
-                      // This ensures the typed text and placeholder are dark/black
-                      color: '#000000',
-                      '& fieldset': {
-                        borderColor: alpha(colors.purple, 0.2),
-                      },
-                      '&:hover fieldset': {
-                        borderColor: colors.purple,
-                      },
-                      // Ensures the text remains black when focused
-                      '&.Mui-focused fieldset': {
-                        borderColor: colors.purple,
-                      },
-                    },
-                    // This targets the input text specifically
-                    '& .MuiInputBase-input': {
-                      color: '#000000',
-                    },
-                    // Optional: Adjust placeholder color if it's too light
-                    '& .MuiInputBase-input::placeholder': {
-                      color: alpha('#000000', 0.6),
-                      opacity: 1,
-                    },
-                  }}
-                />
-
-                <Button
-                  fullWidth
-                  variant="contained"
-                  onClick={handleSearch}
-                  disabled={loading || !techniqueId.trim()}
-                  size="large"
-                  endIcon={<ArrowForwardIcon />}
-                  sx={{
-                    background: `linear-gradient(135deg, ${colors.purple}, ${colors.primary})`,
-                    boxShadow: `0 4px 14px 0 ${alpha(colors.primary, 0.39)}`,
-                    py: 1.5,
-                  }}
-                >
-                  Search
-                </Button>
-
-                {loading && (
-                  <Box sx={{ mt: 2, textAlign: 'center' }}>
-                    <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                      Fetching technique details...
-                    </Typography>
-                  </Box>
+                {recent.length > 0 && (
+                  <div className="recent-searches">
+                    <span className="recent-label">Recent</span>
+                    {recent.map(t => (
+                      <button key={t} className="recent-pill" onClick={() => { setQuery(t); search(t); }}>{t}</button>
+                    ))}
+                  </div>
                 )}
+              </div>
+            </div>
 
-                {error && (
-                  <Fade in>
-                    <Alert severity="error" sx={{ mt: 2, bgcolor: alpha(colors.error, 0.1), color: colors.error }}>
-                      {error}
-                    </Alert>
-                  </Fade>
-                )}
-              </CardContent>
-            </Card>
+            {/* Common Techniques */}
+            <div className="card">
+              <div className="card-header"><span className="card-title">Common Techniques</span></div>
+              <div>
+                {COMMON_TECHNIQUES.map(t => (
+                  <div
+                    key={t.id}
+                    className="technique-row"
+                    onClick={() => { setQuery(t.id); search(t.id); }}
+                  >
+                    <div>
+                      <span className="technique-id">{t.id}</span>
+                      <span className="technique-name">{t.name}</span>
+                      <span className="technique-tactic">{t.tactic}</span>
+                    </div>
+                    <span className={`severity-chip ${t.severity.toLowerCase()}`}>{t.severity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            <Card
-              sx={{
-                bgcolor: colors.surface,
-                border: `1px solid ${alpha(colors.purple, 0.2)}`,
-                borderRadius: 3,
-                boxShadow: `0 4px 6px -1px ${alpha(colors.text, 0.05)}`,
-              }}
-            >
-              <CardContent>
-                <Typography variant="h6" sx={{ color: colors.text, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <InfoIcon sx={{ color: colors.purple }} />
-                  Common Techniques
-                </Typography>
-
-                <List sx={{ width: '100%' }}>
-                  {commonTechniques.map((technique, index) => (
-                    <Zoom in key={technique.id} style={{ transitionDelay: `${index * 50}ms` }}>
-                      <ListItem
-                        button
-                        onClick={() => {
-                          setTechniqueId(technique.id);
-                          setTimeout(() => handleSearch(), 100);
-                        }}
-                        sx={{
-                          borderRadius: 2,
-                          mb: 1,
-                          bgcolor: alpha(technique.color, 0.05),
-                          border: `1px solid ${alpha(technique.color, 0.1)}`,
-                          '&:hover': {
-                            bgcolor: alpha(technique.color, 0.1),
-                          },
-                        }}
-                      >
-                        <ListItemIcon>
-                          <LocalPoliceIcon sx={{ color: technique.color }} />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={
-                            <Typography variant="body2" sx={{ color: colors.text, fontWeight: 600 }}>
-                              {technique.id} - {technique.name}
-                            </Typography>
-                          }
-                          secondary={
-                            <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                              {technique.description}
-                            </Typography>
-                          }
-                        />
-                      </ListItem>
-                    </Zoom>
+            {/* Saved */}
+            {saved.length > 0 && (
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="card-header"><span className="card-title">🔖 Saved Techniques</span></div>
+                <div>
+                  {saved.map(t => (
+                    <div key={t.id} className="technique-row" onClick={() => { setQuery(t.id); search(t.id); }}>
+                      <div>
+                        <span className="technique-id">{t.id}</span>
+                        <span className="technique-name">{t.name || t.id}</span>
+                      </div>
+                      <button className="rule-delete-btn" onClick={e => { e.stopPropagation(); toggleSave(t); }}>✖</button>
+                    </div>
                   ))}
-                </List>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </Grid>
-
-        {/* Right Panel - Results */}
-        <Grid item xs={12} md={8}>
-          <AnimatePresence mode="wait">
-            {result ? (
-              <motion.div
-                key="result"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.5 }}
-              >
-                <Card
-                  sx={{
-                    bgcolor: colors.surface,
-                    border: `1px solid ${alpha(colors.success, 0.3)}`,
-                    borderRadius: 3,
-                    boxShadow: `0 10px 15px -3px ${alpha(colors.text, 0.1)}`,
-                  }}
-                >
-                  <CardContent>
-                    {/* Result Header */}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Avatar sx={{ bgcolor: alpha(colors.purple, 0.1), color: colors.purple }}>
-                          <LocalPoliceIcon />
-                        </Avatar>
-                        <Box>
-                          <Typography variant="h5" sx={{ color: colors.text, fontWeight: 700 }}>
-                            {result.id}
-                          </Typography>
-                          <Typography variant="subtitle1" sx={{ color: colors.purple }}>
-                            {result.name}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Stack direction="row" spacing={1}>
-                        <Tooltip title="Save Technique">
-                          <IconButton onClick={() => toggleSave(result)} sx={{ color: colors.textSecondary }}>
-                            {savedTechniques.find(t => t.id === result.id) ? (
-                              <BookmarkIcon sx={{ color: colors.purple }} />
-                            ) : (
-                              <BookmarkBorderIcon />
-                            )}
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Copy ID">
-                          <IconButton onClick={() => copyToClipboard(result.id)} sx={{ color: colors.textSecondary }}>
-                            <ContentCopyIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Share">
-                          <IconButton sx={{ color: colors.textSecondary }}>
-                            <ShareIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
-                    </Box>
-
-                    <Divider sx={{ borderColor: alpha(colors.purple, 0.1), mb: 3 }} />
-
-                    {/* Description */}
-                    <Typography variant="subtitle2" sx={{ color: colors.purple, mb: 2 }}>
-                      Description
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: colors.text, mb: 4, lineHeight: 1.8 }}>
-                      {result.description}
-                    </Typography>
-
-                    {/* Additional Info */}
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
-                        <Paper sx={{ p: 2, bgcolor: alpha(colors.info, 0.05), border: `1px solid ${alpha(colors.info, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                          <Typography variant="subtitle2" sx={{ color: colors.info, mb: 1 }}>
-                            Tactics
-                          </Typography>
-                          <Chip
-                            label="Execution"
-                            size="small"
-                            sx={{ bgcolor: alpha(colors.info, 0.1), color: colors.info, mr: 1, fontWeight: 500 }}
-                          />
-                          <Chip
-                            label="Persistence"
-                            size="small"
-                            sx={{ bgcolor: alpha(colors.info, 0.1), color: colors.info, fontWeight: 500 }}
-                          />
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <Paper sx={{ p: 2, bgcolor: alpha(colors.warning, 0.05), border: `1px solid ${alpha(colors.warning, 0.2)}`, borderRadius: 2, elevation: 0 }}>
-                          <Typography variant="subtitle2" sx={{ color: colors.warning, mb: 1 }}>
-                            Platforms
-                          </Typography>
-                          <Chip
-                            label="Windows"
-                            size="small"
-                            sx={{ bgcolor: alpha(colors.warning, 0.1), color: colors.warning, mr: 1, fontWeight: 500 }}
-                          />
-                          <Chip
-                            label="Linux"
-                            size="small"
-                            sx={{ bgcolor: alpha(colors.warning, 0.1), color: colors.warning, mr: 1, fontWeight: 500 }}
-                          />
-                          <Chip
-                            label="macOS"
-                            size="small"
-                            sx={{ bgcolor: alpha(colors.warning, 0.1), color: colors.warning, fontWeight: 500 }}
-                          />
-                        </Paper>
-                      </Grid>
-                    </Grid>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="placeholder"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                <Card
-                  sx={{
-                    bgcolor: colors.surface,
-                    border: `1px solid ${alpha(colors.purple, 0.1)}`,
-                    borderRadius: 3,
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minHeight: 400,
-                    boxShadow: `0 4px 6px -1px ${alpha(colors.text, 0.05)}`,
-                  }}
-                >
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <LocalPoliceIcon sx={{ fontSize: 80, color: alpha(colors.purple, 0.2), mb: 2 }} />
-                    <Typography variant="h6" sx={{ color: colors.textSecondary, mb: 1 }}>
-                      No Technique Selected
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: alpha(colors.textSecondary, 0.7) }}>
-                      Enter a MITRE ID or select from common techniques
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </motion.div>
+                </div>
+              </div>
             )}
-          </AnimatePresence>
-        </Grid>
-      </Grid>
-    </Box>
-  );
-};
+          </div>
 
-export default MitreExplorer;
+          {/* Right panel */}
+          <div className="mitre-right">
+            {error && <div className="auth-error"><span>⚠️</span> {error}</div>}
+
+            {!result && !loading && !error && (
+              <div className="empty-state" style={{ padding: '80px 24px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)' }}>
+                <span className="empty-icon">📋</span>
+                <span className="empty-title">No technique selected</span>
+                <span className="empty-sub">Enter a MITRE technique ID or select from the list</span>
+              </div>
+            )}
+
+            {loading && (
+              <div className="page-loading" style={{ height: 300, border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+                <div className="loading-spinner" />
+                <span>Fetching technique…</span>
+              </div>
+            )}
+
+            {result && (
+              <div className="mitre-result">
+                <div className="mitre-result-header">
+                  <div>
+                    <div className="mitre-result-id">{result.id}</div>
+                    <div className="mitre-result-name">{result.name}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className={`mitre-action-btn ${isSaved(result.id) ? 'mab-saved' : ''}`}
+                      onClick={() => toggleSave(result)}
+                      title={isSaved(result.id) ? 'Unsave' : 'Save technique'}
+                    >
+                      {isSaved(result.id) ? '🔖 Saved' : '🔖 Save'}
+                    </button>
+                    <button
+                      className="mitre-action-btn"
+                      onClick={() => copy(result.id)}
+                      title="Copy ID"
+                    >
+                      {copied ? '✓ Copied' : '📋 Copy ID'}
+                    </button>
+                  </div>
+                </div>
+
+                {result.description && (
+                  <div className="mitre-desc">
+                    <div className="detail-label">Description</div>
+                    <p>{result.description}</p>
+                  </div>
+                )}
+
+                <div className="mitre-meta-grid">
+                  {result.tactics?.length > 0 && (
+                    <div className="mitre-meta-card">
+                      <div className="detail-label">Tactics</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                        {result.tactics.map((t, i) => <span key={i} className="rule-chip" style={{ color: 'var(--info)' }}>{t}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {result.platforms?.length > 0 && (
+                    <div className="mitre-meta-card">
+                      <div className="detail-label">Platforms</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                        {result.platforms.map((p, i) => <span key={i} className="rule-chip" style={{ color: 'var(--warning)' }}>{p}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {result.detection && (
+                    <div className="mitre-meta-card" style={{ gridColumn: '1 / -1' }}>
+                      <div className="detail-label">Detection</div>
+                      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 6 }}>{result.detection}</p>
+                    </div>
+                  )}
+                </div>
+
+                {result.mitigations?.length > 0 && (
+                  <div className="mitre-mitigations">
+                    <div className="detail-label" style={{ marginBottom: 8 }}>Mitigations</div>
+                    {result.mitigations.map((m, i) => (
+                      <div key={i} className="mitigation-item">
+                        <span className="mitigation-id">{m.id}</span>
+                        <span className="mitigation-name">{m.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
