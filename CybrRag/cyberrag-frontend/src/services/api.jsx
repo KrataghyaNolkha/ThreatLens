@@ -1,8 +1,11 @@
 // src/services/api.js
 import axios from 'axios';
 
-// Use 127.0.0.1 instead of localhost
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:8001/api/v1';
+// Use the Render backend in production, and localhost in development
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 
+  (process.env.NODE_ENV === 'production' 
+    ? 'https://threatlens-backend-elq7.onrender.com/api/v1' 
+    : 'http://127.0.0.1:8001/api/v1');
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
 
 const api = axios.create({
