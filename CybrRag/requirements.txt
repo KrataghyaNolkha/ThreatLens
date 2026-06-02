@@ -13,3 +13,5 @@ python-dotenv
 requests
 groq
 python-docx
+scikit-learn
+PyMySQL
